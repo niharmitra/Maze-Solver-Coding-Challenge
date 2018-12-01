@@ -18,10 +18,14 @@ def main():
 	mazeStatus = requests.get(endpoint+"/game", params=params, headers=header)
 	if (mazeStatus.status_code != requests.codes.ok):
 		print("Error trying to start mazes", file=sys.stderr)
-	for i in range(mazeStatus.json()["total_levels"]):
-		print("Starting maze number "+str(i))
+	if (mazeStatus.json()["status"] == "FINISHED"):
+		print("Already finished this session (please wait)")
+		sys.exit(0)
+	print("Total mazes to tackle: ", mazeStatus.json()["total_levels"])
+	for i in range(mazeStatus.json()["levels_completed"], mazeStatus.json()["total_levels"]):
+		print("Starting maze index "+str(i))
 		solveMaze(params)
-	print("Solved all "+ str(i) +" mazes")
+	print("Solved all "+ str(i+1) +" mazes")
 
 def startGame(attemptNum):
 	body = {"uid": "204993636"}
@@ -86,42 +90,47 @@ def DFS(maze, currentPosition, stack, width, height, params):
 	# DFS clockwise: up then right then down then left
 	# First check bounds, then try to reach unexplored area
 	# up => y-1
-	if (currentPosition[0] >= 0 and
+	if (currentPosition[0] > 0 and
 		maze[currentPosition[0]-1][currentPosition[1]] > 1):
 			stack.append("UP")
 			result = move("UP", currentPosition, params)
 	# right => x+1
-	elif (currentPosition[1] < width and 
+	elif (currentPosition[1] < width-1 and 
 		maze[currentPosition[0]][currentPosition[1]+1] > 1):
 			stack.append("RIGHT")
 			result = move("RIGHT", currentPosition, params)
 	# down => y+1
-	elif (currentPosition[0] < height and
+	elif (currentPosition[0] < height-1 and
 		maze[currentPosition[0]+1][currentPosition[1]] > 1):
 			stack.append("DOWN")
 			result = move("DOWN", currentPosition, params)
 	# left => x-1
-	elif (currentPosition[0] >= 0 and
+	elif (currentPosition[1] > 0 and
 		maze[currentPosition[0]][currentPosition[1]-1] > 1):
 			stack.append("LEFT")
 			result = move("LEFT", currentPosition, params)
 	# no unexplored options, backtrack
 	else:
 		print (stack)
-		move(stack.pop(), currentPosition, params, reverse=True)
+		try:
+			move(stack.pop(), currentPosition, params, reverse=True)
+		except IndexError:
+			print (maze)
+			sys.exit(1)
 		return DFS(maze, currentPosition, stack, width, height, params)
 	
 	# check the results of the move if one was made
 	if (result == "WALL"):
 		maze[currentPosition[0]][currentPosition[1]] = 0
-		move(stack.pop(), currentPosition, params, reverse=True)
+		# you automatically get bounced back, i.e. don't get moved
+		restorePosition(stack.pop(), currentPosition)
 		return DFS(maze, currentPosition, stack, width, height, params)
 	elif (result == "END"):
 		return True
 	elif (result == "OUT_OF_BOUNDS"):
 		print("Out of bounds ", currentPosition)
 		maze[currentPosition[0]][currentPosition[1]] = 0
-		move(stack.pop(), currentPosition, params, reverse=True)
+		restorePosition(stack.pop(), currentPosition)
 		return DFS(maze, currentPosition, stack, width, height, params)
 		sys.exit(1)
 	elif (result == "SUCCESS"):
@@ -132,6 +141,19 @@ def DFS(maze, currentPosition, stack, width, height, params):
 	print ("Should be unreachable code", file=sys.stderr)
 	return False
 	
+# helper function when wall is hit, adjusts our detected position
+def restorePosition(dir, currentPosition):
+	dir = reverseDirs[dir]
+	print ("bounced off wall back to ", dir)
+	# modify current position
+	if (dir == "UP"):
+		currentPosition[0]-=1
+	elif (dir == "RIGHT"):
+		currentPosition[1]+=1
+	elif (dir == "DOWN"):
+		currentPosition[0]+=1
+	elif (dir == "LEFT"):
+		currentPosition[1]-=1
 
 # helper function to HTTP request, reverse for when undoing stack
 def move(dir, currentPosition, params, reverse=False):
@@ -152,6 +174,7 @@ def move(dir, currentPosition, params, reverse=False):
 	move = requests.post(endpoint+"/game", params=params, headers=header, data=json.dumps(body))
 	if (move.status_code != requests.codes.ok):
 		print("Couldn't HTTP POST a move", file=sys.stderr)
+		print(move.response)
 		sys.exit(1)
 	# WALL, SUCCESS, OUT_OF_BOUNDS, END
 	print ("moving "+dir, "from ", currentPosition)
